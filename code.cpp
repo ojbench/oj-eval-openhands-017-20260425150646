@@ -135,7 +135,7 @@ int main(){
             string m = get_arg("-m");
             string gstr = get_arg("-g");
             if(users.empty()){
-                if(users.count(u)) { cout << -1 << "\n"; continue; }
+                if(users.count(u)) { out("-1"); continue; }
                 User usr; usr.username=u; usr.password=p; usr.name=n; usr.mail=m; usr.privilege=10;
                 users[u]=usr; out("0"); continue;
             }
@@ -295,7 +295,65 @@ int main(){
                 out(lineOut);
             }
         }
-        else if(cmd == "query_ticket" || cmd == "query_transfer"){
+        else if(cmd == "query_ticket"){
+            string S = get_arg("-s");
+            string T = get_arg("-t");
+            string D = get_arg("-d");
+            string pflag = get_arg("-p");
+            int dayS = md_to_day(D);
+            if(dayS < 0){ out("0"); continue; }
+            struct R { string id, fromS, toS; int dep, arr, price, seat; };
+            vector<R> res;
+            for(auto &kv : trains){
+                auto &tr = kv.second;
+                if(!tr.released) continue; // only after release
+                int n = tr.stationNum;
+                int si=-1, ti=-1;
+                for(int i=0;i<n;i++) if(tr.stations[i]==S){ si=i; break; }
+                for(int i=0;i<n;i++) if(tr.stations[i]==T){ ti=i; break; }
+                if(si==-1 || ti==-1 || si>=ti) continue;
+                // precompute cum arrays
+                vector<int> cumTravel(n,0), cumStop(n,0), cumPrice(n,0);
+                for(int i=1;i<n;i++) cumPrice[i] = cumPrice[i-1] + tr.prices[i-1];
+                for(int i=1;i<n;i++){
+                    cumTravel[i] = cumTravel[i-1] + tr.travel[i-1];
+                    if(i>=2) cumStop[i] = cumStop[i-1] + tr.stopover[i-2];
+                }
+                int depart_offset = tr.startH*60 + tr.startM + cumTravel[si] + cumStop[si];
+                int baseDay = dayS - (depart_offset / (24*60));
+                if(baseDay < tr.saleStart || baseDay > tr.saleEnd) continue;
+                int base = baseDay*24*60 + tr.startH*60 + tr.startM;
+                int depAbs = base + cumTravel[si] + cumStop[si];
+                if(si>0) depAbs += tr.stopover[si-1]; // leaving time at si
+                int arrAbs = base + cumTravel[ti] + cumStop[ti];
+                int price = cumPrice[ti] - cumPrice[si];
+                int seat = tr.seatNum;
+                res.push_back({tr.id, S, T, depAbs, arrAbs, price, seat});
+            }
+            if(pflag=="time"){
+                sort(res.begin(), res.end(), [&](const R&a,const R&b){
+                    long long ta = (long long)a.arr - a.dep;
+                    long long tb = (long long)b.arr - b.dep;
+                    if(ta!=tb) return ta<tb;
+                    if(a.price!=b.price) return a.price<b.price;
+                    return a.id < b.id;
+                });
+            }else{
+                sort(res.begin(), res.end(), [&](const R&a,const R&b){
+                    if(a.price!=b.price) return a.price<b.price;
+                    long long ta = (long long)a.arr - a.dep;
+                    long long tb = (long long)b.arr - b.dep;
+                    if(ta!=tb) return ta<tb;
+                    return a.id < b.id;
+                });
+            }
+            out(to_string((int)res.size()));
+            for(auto &r: res){
+                string lineOut = r.id + ' ' + r.fromS + ' ' + fmt_time(r.dep) + " -> " + r.toS + ' ' + fmt_time(r.arr) + ' ' + to_string(r.price) + ' ' + to_string(r.seat);
+                out(lineOut);
+            }
+        }
+        else if(cmd == "query_transfer"){
             out("0");
         }
         else if(cmd == "buy_ticket" || cmd == "query_order" || cmd == "refund_ticket"){
