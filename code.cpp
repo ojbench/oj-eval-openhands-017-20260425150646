@@ -4,6 +4,8 @@ using namespace std;
 static const char* USERS_DB = "users.db";
 static const char* TRAINS_DB = "trains.db";
 
+static const char* SEATS_DB = "seats.db";
+
 struct User {
     string username;
     string password;
@@ -429,7 +431,97 @@ int main(){
             }
         }
         else if(cmd == "query_transfer"){
-            out("0");
+            string S = get_arg("-s");
+            string T = get_arg("-t");
+            string D = get_arg("-d");
+            string pflag = get_arg("-p");
+            int dayS = md_to_day(D);
+            if(dayS < 0){ out("0"); continue; }
+            struct R { string id1,id2, s1, x, t2; int d1,a1,d2,a2, price, seat; long long key_time, key_cost; } best;
+            bool has=false;
+            // Precompute station indices maps for faster lookup
+            for(auto &akv : trains){
+                auto &A = akv.second; if(!A.released) continue;
+                int nA=A.stationNum; int si=-1;
+                for(int i=0;i<nA;i++) if(A.stations[i]==S){ si=i; break; }
+                if(si==-1) continue;
+                // cum arrays A
+                vector<int> cumTA(nA,0), cumSA(nA,0), cumPA(nA,0);
+                for(int i=1;i<nA;i++) cumPA[i]=cumPA[i-1]+A.prices[i-1];
+                for(int i=1;i<nA;i++){ cumTA[i]=cumTA[i-1]+A.travel[i-1]; if(i>=2) cumSA[i]=cumSA[i-1]+A.stopover[i-2]; }
+                int offDepA = A.startH*60 + A.startM + cumTA[si] + cumSA[si] + (si>0?A.stopover[si-1]:0);
+                int baseA = dayS - (offDepA / (24*60));
+                if(baseA < A.saleStart || baseA > A.saleEnd) continue;
+                int baseAbsA = baseA*24*60 + A.startH*60 + A.startM;
+                int depAbsA = baseAbsA + cumTA[si] + cumSA[si] + (si>0?A.stopover[si-1]:0);
+                for(int xi=si+1; xi<nA; ++xi){
+                    // arrival at X on A
+                    int arrAX = baseAbsA + cumTA[xi] + cumSA[xi];
+                    int priceA = cumPA[xi] - cumPA[si];
+                    // search B trains
+                    for(auto &bkv : trains){
+                        auto &B = bkv.second; if(!B.released) continue; if(B.id==A.id) continue;
+                        int nB=B.stationNum; int xj=-1, tj=-1;
+                        for(int j=0;j<nB;j++) if(B.stations[j]==A.stations[xi]){ xj=j; break; }
+                        if(xj==-1) continue;
+                        for(int j=0;j<nB;j++) if(B.stations[j]==T){ tj=j; break; }
+                        if(tj==-1 || xj>=tj) continue;
+                        // cum arrays B
+                        vector<int> cumTB(nB,0), cumSB(nB,0), cumPB(nB,0);
+                        for(int j=1;j<nB;j++) cumPB[j]=cumPB[j-1]+B.prices[j-1];
+                        for(int j=1;j<nB;j++){ cumTB[j]=cumTB[j-1]+B.travel[j-1]; if(j>=2) cumSB[j]=cumSB[j-1]+B.stopover[j-2]; }
+                        int offDepBX = B.startH*60 + B.startM + cumTB[xj] + cumSB[xj] + (xj>0?B.stopover[xj-1]:0);
+                        long long diff = (long long)arrAX - (long long)offDepBX;
+                        long long baseB = diff>0 ? ( (diff + 1440 - 1)/1440 ) : 0;
+                        int baseBi = (int)baseB;
+                        if(baseBi < B.saleStart) baseBi = B.saleStart;
+                        if(baseBi > B.saleEnd) continue;
+                        int baseAbsB = baseBi*24*60 + B.startH*60 + B.startM;
+                        int depAbsB = baseAbsB + cumTB[xj] + cumSB[xj] + (xj>0?B.stopover[xj-1]:0);
+                        if(depAbsB < arrAX) continue; // ensure depart after arrival
+                        int arrBT = baseAbsB + cumTB[tj] + cumSB[tj];
+                        int priceB = cumPB[tj] - cumPB[xj];
+                        int seat = min(A.seatNum, B.seatNum);
+                        long long totalTime = (long long)(arrAX - depAbsA) + (long long)(arrBT - depAbsB) + (long long)(depAbsB - arrAX);
+                        int totalPrice = priceA + priceB;
+                        bool better=false;
+                        if(!has){ better=true; }
+                        else if(pflag=="time"){
+                            if(totalTime < best.key_time) better=true;
+                            else if(totalTime==best.key_time && totalPrice < (int)best.key_cost) better=true;
+                        } else {
+                            if(totalPrice < (int)best.key_cost) better=true;
+                            else if(totalPrice==(int)best.key_cost && totalTime < best.key_time) better=true;
+                        }
+                        if(better){
+                            has=true;
+                            best.id1=A.id; best.id2=B.id; best.s1=S; best.x=A.stations[xi]; best.t2=T;
+                            best.d1=depAbsA; best.a1=arrAX; best.d2=depAbsB; best.a2=arrBT;
+                            best.price=totalPrice; best.seat=seat; best.key_time=totalTime; best.key_cost=totalPrice;
+                        }
+                    }
+                }
+            }
+            if(!has){ out("0"); }
+            else{
+                string line1 = best.id1 + ' ' + best.s1 + ' ' + fmt_time(best.d1) + " -> " + best.x + ' ' + fmt_time(best.a1) + ' ' + to_string(best.price - 0) + ' ' + to_string(best.seat);
+                // For output, the price on first line should be price from s to x; reconstruct
+                // Recompute price1 by querying A quickly
+                int price1=0; int price2=best.price;
+                // As we didn't store it, recompute by scanning again (small scale)
+                {
+                    auto itA = trains.find(best.id1);
+                    if(itA!=trains.end()){
+                        auto &A=itA->second; int si=-1, xi=-1; for(int i=0;i<A.stationNum;i++){ if(A.stations[i]==best.s1){si=i;} if(A.stations[i]==best.x){xi=i;} }
+                        if(si!=-1 && xi!=-1){ int sum=0; for(int i=si;i<xi;i++) sum+=A.prices[i]; price1=sum; }
+                    }
+                }
+                price2 -= price1;
+                string line1fix = best.id1 + ' ' + best.s1 + ' ' + fmt_time(best.d1) + " -> " + best.x + ' ' + fmt_time(best.a1) + ' ' + to_string(price1) + ' ' + to_string(best.seat);
+                string line2 = best.id2 + ' ' + best.x + ' ' + fmt_time(best.d2) + " -> " + best.t2 + ' ' + fmt_time(best.a2) + ' ' + to_string(price2) + ' ' + to_string(best.seat);
+                out(line1fix);
+                out(line2);
+            }
         }
         else if(cmd == "buy_ticket" || cmd == "query_order" || cmd == "refund_ticket"){
             out("-1");
