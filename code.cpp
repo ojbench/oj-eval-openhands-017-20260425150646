@@ -5,6 +5,7 @@ static const char* USERS_DB = "users.db";
 static const char* TRAINS_DB = "trains.db";
 
 static const char* SEATS_DB = "seats.db";
+static const char* ORDERS_DB = "orders.db";
 
 struct User {
     string username;
