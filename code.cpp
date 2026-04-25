@@ -88,6 +88,19 @@ static void load_trains(unordered_map<string,Train> &trains){
         Train t; t.id=parts[0]; t.stationNum=stoi(parts[1]); t.seatNum=stoi(parts[2]); t.startH=stoi(parts[3]); t.startM=stoi(parts[4]); t.saleStart=stoi(parts[5]); t.saleEnd=stoi(parts[6]); t.type=parts[7].empty()?'G':parts[7][0]; t.released = (parts[8]=="1");
         t.stations = split_bar(parts[9]);
         { vector<string> v = split_bar(parts[10]); t.prices.clear(); for(auto &x:v) if(!x.empty()) t.prices.push_back(stoi(x)); }
+struct Order {
+    string trainID;
+    string fromS;
+    string toS;
+    int depAbs=0;
+    int arrAbs=0;
+    int price=0;
+    int num=0;
+    string status; // success, pending, refunded
+    int baseDay=0;
+    int fi=0, ti=0; // segment indices
+};
+
         { vector<string> v = split_bar(parts[11]); t.travel.clear(); for(auto &x:v) if(!x.empty()) t.travel.push_back(stoi(x)); }
         { vector<string> v = split_bar(parts[12]); t.stopover.clear(); for(auto &x:v) if(!x.empty()) t.stopover.push_back(stoi(x)); }
         trains[t.id]=t;
@@ -131,14 +144,14 @@ static int md_to_day(const string &md){
 static string day_to_md(int dayIndex){
     int d = dayIndex;
     if(d < 30){ // June
-        int dd = d+1; char buf[6]; snprintf(buf,sizeof(buf),"06-%02d", dd); return string(buf);
+        int dd = d+1; char buf[8]; snprintf(buf,sizeof(buf),"06-%02d", dd); return string(buf);
     }
     d -= 30;
     if(d < 31){ // July
-        int dd = d+1; char buf[6]; snprintf(buf,sizeof(buf),"07-%02d", dd); return string(buf);
+        int dd = d+1; char buf[8]; snprintf(buf,sizeof(buf),"07-%02d", dd); return string(buf);
     }
     d -= 31; // August
-    int dd = d+1; char buf[6]; snprintf(buf,sizeof(buf),"08-%02d", dd); return string(buf);
+    int dd = d+1; char buf[8]; snprintf(buf,sizeof(buf),"08-%02d", dd); return string(buf);
 }
 
 static string fmt_time(int totalMinutes){
@@ -217,6 +230,7 @@ int main(){
             if(!users.count(c) || !online.count(c)) { out("-1"); continue; }
             if(users.count(u)) { out("-1"); continue; }
             int g=0; try{ g = stoi(gstr); } catch(...) { out("-1"); continue; }
+            if(g < 0 || g > 10) { out("-1"); continue; }
             if(g >= users[c].privilege) { out("-1"); continue; }
             User usr; usr.username=u; usr.password=p; usr.name=n; usr.mail=m; usr.privilege=g;
             users[u]=usr; save_users(users); out("0");
