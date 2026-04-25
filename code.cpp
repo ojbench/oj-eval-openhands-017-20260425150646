@@ -1,6 +1,9 @@
 #include <bits/stdc++.h>
 using namespace std;
 
+static const char* USERS_DB = "users.db";
+static const char* TRAINS_DB = "trains.db";
+
 struct User {
     string username;
     string password;
@@ -23,6 +26,72 @@ struct Train {
     char type = 'G';
     bool released = false;
 };
+
+static vector<string> split_bar(const string &s){
+    vector<string> res; size_t pos=0; while(true){ size_t q=s.find('|',pos); string part=s.substr(pos, q==string::npos? string::npos : q-pos); res.push_back(part); if(q==string::npos) break; pos=q+1; }
+    return res;
+}
+static string join_bar(const vector<string> &v){
+    string r; for(size_t i=0;i<v.size();++i){ if(i) r.push_back('|'); r += v[i]; } return r;
+}
+static string join_bar_int(const vector<int> &v){
+    string r; for(size_t i=0;i<v.size();++i){ if(i) r.push_back('|'); r += to_string(v[i]); } return r;
+}
+
+static void save_users(const unordered_map<string,User> &users){
+    ofstream f(USERS_DB);
+    if(!f) return;
+    for(const auto &kv: users){
+        const User &u = kv.second;
+        f << u.username << '\t' << u.password << '\t' << u.name << '\t' << u.mail << '\t' << u.privilege << '\n';
+    }
+}
+static void load_users(unordered_map<string,User> &users){
+    users.clear();
+    ifstream f(USERS_DB);
+    if(!f) return;
+    string line;
+    while(getline(f,line)){
+        if(line.empty()) continue;
+        // fields separated by tabs
+        vector<string> parts; parts.reserve(5);
+        size_t pos=0; while(true){ size_t q=line.find('\t',pos); string part=line.substr(pos, q==string::npos? string::npos: q-pos); parts.push_back(part); if(q==string::npos) break; pos=q+1; }
+        if(parts.size()<5) continue;
+        User u; u.username=parts[0]; u.password=parts[1]; u.name=parts[2]; u.mail=parts[3]; u.privilege=stoi(parts[4]);
+        users[u.username]=u;
+    }
+}
+
+static void save_trains(const unordered_map<string,Train> &trains){
+    ofstream f(TRAINS_DB);
+    if(!f) return;
+    for(const auto &kv: trains){
+        const Train &t = kv.second;
+        f << t.id << '\t' << t.stationNum << '\t' << t.seatNum << '\t'
+          << t.startH << '\t' << t.startM << '\t' << t.saleStart << '\t' << t.saleEnd << '\t'
+          << t.type << '\t' << (t.released?1:0) << '\t'
+          << join_bar(t.stations) << '\t' << join_bar_int(t.prices) << '\t' << join_bar_int(t.travel) << '\t' << join_bar_int(t.stopover) << '\n';
+    }
+}
+static void load_trains(unordered_map<string,Train> &trains){
+    trains.clear();
+    ifstream f(TRAINS_DB);
+    if(!f) return;
+    string line;
+    while(getline(f,line)){
+        if(line.empty()) continue;
+        vector<string> parts; parts.reserve(13);
+        size_t pos=0; while(true){ size_t q=line.find('\t',pos); string part=line.substr(pos, q==string::npos? string::npos: q-pos); parts.push_back(part); if(q==string::npos) break; pos=q+1; }
+        if(parts.size()<13) continue;
+        Train t; t.id=parts[0]; t.stationNum=stoi(parts[1]); t.seatNum=stoi(parts[2]); t.startH=stoi(parts[3]); t.startM=stoi(parts[4]); t.saleStart=stoi(parts[5]); t.saleEnd=stoi(parts[6]); t.type=parts[7].empty()?'G':parts[7][0]; t.released = (parts[8]=="1");
+        t.stations = split_bar(parts[9]);
+        { vector<string> v = split_bar(parts[10]); t.prices.clear(); for(auto &x:v) if(!x.empty()) t.prices.push_back(stoi(x)); }
+        { vector<string> v = split_bar(parts[11]); t.travel.clear(); for(auto &x:v) if(!x.empty()) t.travel.push_back(stoi(x)); }
+        { vector<string> v = split_bar(parts[12]); t.stopover.clear(); for(auto &x:v) if(!x.empty()) t.stopover.push_back(stoi(x)); }
+        trains[t.id]=t;
+    }
+}
+
 
 static inline string trim(const string &s){
     size_t i=0,j=s.size();
@@ -88,6 +157,8 @@ int main(){
     unordered_map<string, User> users;
     unordered_set<string> online;
     unordered_map<string, Train> trains;
+    load_users(users);
+    load_trains(trains);
 
     string line;
     while (true){
@@ -125,6 +196,8 @@ int main(){
             users.clear();
             online.clear();
             trains.clear();
+            save_users(users);
+            save_trains(trains);
             out("0");
         }
         else if(cmd == "add_user"){
@@ -137,14 +210,14 @@ int main(){
             if(users.empty()){
                 if(users.count(u)) { out("-1"); continue; }
                 User usr; usr.username=u; usr.password=p; usr.name=n; usr.mail=m; usr.privilege=10;
-                users[u]=usr; out("0"); continue;
+                users[u]=usr; save_users(users); out("0"); continue;
             }
             if(!users.count(c) || !online.count(c)) { out("-1"); continue; }
             if(users.count(u)) { out("-1"); continue; }
             int g=0; try{ g = stoi(gstr); } catch(...) { out("-1"); continue; }
             if(g >= users[c].privilege) { out("-1"); continue; }
             User usr; usr.username=u; usr.password=p; usr.name=n; usr.mail=m; usr.privilege=g;
-            users[u]=usr; out("0");
+            users[u]=usr; save_users(users); out("0");
         }
         else if(cmd == "login"){
             string u = get_arg("-u");
@@ -184,6 +257,7 @@ int main(){
             if(!np.empty()) users[u].password = np;
             if(!nn.empty()) users[u].name = nn;
             if(!nm.empty()) users[u].mail = nm;
+            save_users(users);
             User &x = users[u];
             out(x.username + ' ' + x.name + ' ' + x.mail + ' ' + to_string(x.privilege));
         }
@@ -243,19 +317,20 @@ int main(){
             tr.type = ystr.empty()? 'G' : ystr[0];
             tr.released = false;
             trains[id] = tr;
+            save_trains(trains);
             out("0");
         }
         else if(cmd == "release_train"){
             string id = get_arg("-i");
             auto it = trains.find(id);
             if(it==trains.end() || it->second.released){ out("-1"); }
-            else { it->second.released = true; out("0"); }
+            else { it->second.released = true; save_trains(trains); out("0"); }
         }
         else if(cmd == "delete_train"){
             string id = get_arg("-i");
             auto it = trains.find(id);
             if(it==trains.end() || it->second.released){ out("-1"); }
-            else { trains.erase(it); out("0"); }
+            else { trains.erase(it); save_trains(trains); out("0"); }
         }
         else if(cmd == "query_train"){
             string id = get_arg("-i");
@@ -319,7 +394,7 @@ int main(){
                     cumTravel[i] = cumTravel[i-1] + tr.travel[i-1];
                     if(i>=2) cumStop[i] = cumStop[i-1] + tr.stopover[i-2];
                 }
-                int depart_offset = tr.startH*60 + tr.startM + cumTravel[si] + cumStop[si];
+                int depart_offset = tr.startH*60 + tr.startM + cumTravel[si] + cumStop[si] + (si>0 ? tr.stopover[si-1] : 0);
                 int baseDay = dayS - (depart_offset / (24*60));
                 if(baseDay < tr.saleStart || baseDay > tr.saleEnd) continue;
                 int base = baseDay*24*60 + tr.startH*60 + tr.startM;
